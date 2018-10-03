@@ -1,0 +1,564 @@
+diff -rupN kopia_czyste/usr/src/minix/fs/mfs/buf.h kopia_poprawione/usr/src/minix/fs/mfs/buf.h
+--- kopia_czyste/usr/src/minix/fs/mfs/buf.h	2018-06-01 15:39:21.765323766 +0200
++++ kopia_poprawione/usr/src/minix/fs/mfs/buf.h	2018-06-01 15:38:09.161990433 +0200
+@@ -0,0 +1,44 @@
++#ifndef __MFS_BUF_H__
++#define __MFS_BUF_H__
++
++#include "clean.h"
++
++/* Buffer (block) cache.  To acquire a block, a routine calls get_block(),
++ * telling which block it wants.  The block is then regarded as "in use"
++ * and has its 'b_count' field incremented.  All the blocks that are not
++ * in use are chained together in an LRU list, with 'front' pointing
++ * to the least recently used block, and 'rear' to the most recently used
++ * block.  A reverse chain, using the field b_prev is also maintained.
++ * Usage for LRU is measured by the time the put_block() is done.  The second
++ * parameter to put_block() can violate the LRU order and put a block on the
++ * front of the list, if it will probably not be needed soon.  If a block
++ * is modified, the modifying routine must set b_dirt to DIRTY, so the block
++ * will eventually be rewritten to the disk.
++ */
++
++#include <sys/dirent.h>
++
++union fsdata_u {
++    char b__data[1];		     /* ordinary user data */
++/* directory block */
++    struct direct b__dir[1];    
++/* V2 indirect block */
++    zone_t  b__v2_ind[1];	     
++/* V2 inode block */
++    d2_inode b__v2_ino[1]; 
++/* bit map block */
++    bitchunk_t b__bitmap[1];  
++};
++
++/* A block is free if b_dev == NO_DEV. */
++
++
++/* These defs make it possible to use to bp->b_data instead of bp->b.b__data */
++#define b_data(b)   ((union fsdata_u *) b->data)->b__data
++#define b_dir(b)    ((union fsdata_u *) b->data)->b__dir
++#define b_v2_ind(b) ((union fsdata_u *) b->data)->b__v2_ind
++#define b_v2_ino(b) ((union fsdata_u *) b->data)->b__v2_ino
++#define b_bitmap(b) ((union fsdata_u *) b->data)->b__bitmap
++
++#endif
++
+diff -rupN kopia_czyste/usr/src/minix/fs/mfs/clean.h kopia_poprawione/usr/src/minix/fs/mfs/clean.h
+--- kopia_czyste/usr/src/minix/fs/mfs/clean.h	2018-06-01 15:39:21.775323766 +0200
++++ kopia_poprawione/usr/src/minix/fs/mfs/clean.h	2018-06-01 15:38:09.165323766 +0200
+@@ -0,0 +1,11 @@
++
++#ifndef _MFS_CLEAN_H
++#define _MFS_CLEAN_H 1
++
++#define MARKDIRTY(b) do { if(superblock.s_dev == lmfs_dev(b) && superblock.s_rd_only) { printf("%s:%d: dirty block on rofs! ", __FILE__, __LINE__); util_stacktrace(); } else { lmfs_markdirty(b); } } while(0)
++#define MARKCLEAN(b) lmfs_markclean(b)
++
++#define ISDIRTY(b)	(!lmfs_isclean(b))
++#define ISCLEAN(b)	(lmfs_isclean(b))
++
++#endif
+diff -rupN kopia_czyste/usr/src/minix/fs/mfs/const.h kopia_poprawione/usr/src/minix/fs/mfs/const.h
+--- kopia_czyste/usr/src/minix/fs/mfs/const.h	2018-06-01 15:39:21.781990433 +0200
++++ kopia_poprawione/usr/src/minix/fs/mfs/const.h	2018-06-01 15:38:09.168657100 +0200
+@@ -0,0 +1,85 @@
++#ifndef __MFS_CONST_H__
++#define __MFS_CONST_H__
++
++/* Tables sizes */
++#define V2_NR_DZONES       7	/* # direct zone numbers in a V2 inode */
++#define V2_NR_TZONES      10	/* total # zone numbers in a V2 inode */
++
++#define NR_INODES        512	/* # slots in "in core" inode table,
++				 * should be more or less the same as
++				 * NR_VNODES in vfs
++				 */
++
++#define INODE_HASH_LOG2   7     /* 2 based logarithm of the inode hash size */
++#define INODE_HASH_SIZE   ((unsigned long)1<<INODE_HASH_LOG2)
++#define INODE_HASH_MASK   (((unsigned long)1<<INODE_HASH_LOG2)-1)
++
++/* Max. filename length */
++#define MFS_NAME_MAX	 MFS_DIRSIZ
++
++
++/* The type of sizeof may be (unsigned) long.  Use the following macro for
++ * taking the sizes of small objects so that there are no surprises like
++ * (small) long constants being passed to routines expecting an int.
++ */
++#define usizeof(t) ((unsigned) sizeof(t))
++
++/* File system types. */
++#define SUPER_MAGIC   0x137F	/* magic number contained in super-block */
++#define SUPER_REV     0x7F13	/* magic # when 68000 disk read on PC or vv */
++#define SUPER_V2      0x2468	/* magic # for V2 file systems */
++#define SUPER_V2_REV  0x6824	/* V2 magic written on PC, read on 68K or vv */
++#define SUPER_V3      0x4d5a	/* magic # for V3 file systems */
++
++#define V2		   2	/* version number of V2 file systems */ 
++#define V3		   3	/* version number of V3 file systems */ 
++
++/* Miscellaneous constants */
++#define SU_UID 	 ((uid_t) 0)	/* super_user's uid_t */
++
++#define NO_BIT   ((bit_t) 0)	/* returned by alloc_bit() to signal failure */
++
++#define LOOK_UP            0 /* tells search_dir to lookup string */
++#define ENTER              1 /* tells search_dir to make dir entry */
++#define DELETE             2 /* tells search_dir to delete entry */
++#define IS_EMPTY           3 /* tells search_dir to ret. OK or ENOTEMPTY */  
++
++/* write_map() args */
++#define WMAP_FREE	(1 << 0)
++
++#define IGN_PERM	0
++#define CHK_PERM	1
++
++#define IN_CLEAN        0	/* in-block inode and memory copies identical */
++#define IN_DIRTY        1	/* in-block inode and memory copies differ */
++#define ATIME            002	/* set if atime field needs updating */
++#define CTIME            004	/* set if ctime field needs updating */
++#define MTIME            010	/* set if mtime field needs updating */
++
++#define BYTE_SWAP          0	/* tells conv2/conv4 to swap bytes */
++
++#define END_OF_FILE   (-104)	/* eof detected */
++
++#define ROOT_INODE   ((ino_t) 1)	/* inode number for root directory */
++#define BOOT_BLOCK  ((block_t) 0)	/* block number of boot block */
++#define SUPER_BLOCK_BYTES  (1024)	/* bytes offset */
++#define START_BLOCK ((block_t) 2)	/* first block of FS (not counting SB) */
++
++#define DIR_ENTRY_SIZE       usizeof (struct direct)  /* # bytes/dir entry   */
++#define NR_DIR_ENTRIES(b)   ((b)/DIR_ENTRY_SIZE)  /* # dir entries/blk   */
++#define SUPER_SIZE      usizeof (struct super_block)  /* super_block size    */
++
++#define FS_BITMAP_CHUNKS(b) ((b)/usizeof (bitchunk_t))/* # map chunks/blk   */
++#define FS_BITCHUNK_BITS		(usizeof(bitchunk_t) * CHAR_BIT)
++#define FS_BITS_PER_BLOCK(b)	(FS_BITMAP_CHUNKS(b) * FS_BITCHUNK_BITS)
++
++/* Derived sizes pertaining to the V2 file system. */
++#define V2_ZONE_NUM_SIZE            usizeof (zone_t)  /* # bytes in V2 zone  */
++#define V2_INODE_SIZE             usizeof (d2_inode)  /* bytes in V2 dsk ino */
++#define V2_INDIRECTS(b)   ((b)/V2_ZONE_NUM_SIZE)  /* # zones/indir block */
++#define V2_INODES_PER_BLOCK(b) ((b)/V2_INODE_SIZE)/* # V2 dsk inodes/blk */
++
++#define NUL(str,l,m) mfs_nul_f(__FILE__,__LINE__,(str), (l), (m))
++
++#endif
++
+diff -rupN kopia_czyste/usr/src/minix/fs/mfs/fs.h kopia_poprawione/usr/src/minix/fs/mfs/fs.h
+--- kopia_czyste/usr/src/minix/fs/mfs/fs.h	2018-06-01 15:39:21.791990433 +0200
++++ kopia_poprawione/usr/src/minix/fs/mfs/fs.h	2018-06-01 15:38:09.171990433 +0200
+@@ -0,0 +1,33 @@
++#ifndef __MFS_FS_H__
++#define __MFS_FS_H__
++
++/* This is the master header for fs.  It includes some other files
++ * and defines the principal constants.
++ */
++#define _SYSTEM		1	/* tell headers that this is the kernel */
++
++#define VERBOSE		0	/* show messages during initialization? */
++
++/* The following are so basic, all the *.c files get them automatically. */
++#include <minix/config.h>	/* MUST be first */
++#include <sys/types.h>
++#include <minix/const.h>
++#include <minix/type.h>
++#include <minix/dmap.h>
++
++#include <lib.h>
++#include <limits.h>
++#include <errno.h>
++
++#include <minix/vfsif.h>
++#include <minix/syslib.h>
++#include <minix/sysutil.h>
++
++#include "mfsdir.h"
++#include "const.h"
++#include "type.h"
++#include "proto.h"
++#include "glo.h"
++
++#endif
++
+diff -rupN kopia_czyste/usr/src/minix/fs/mfs/glo.h kopia_poprawione/usr/src/minix/fs/mfs/glo.h
+--- kopia_czyste/usr/src/minix/fs/mfs/glo.h	2018-06-01 15:39:21.798657099 +0200
++++ kopia_poprawione/usr/src/minix/fs/mfs/glo.h	2018-06-01 15:38:09.175323767 +0200
+@@ -0,0 +1,41 @@
++#ifndef __MFS_GLO_H__
++#define __MFS_GLO_H__
++
++/* EXTERN should be extern except for the table file */
++#ifdef _TABLE
++#undef EXTERN
++#define EXTERN
++#endif
++
++#include <minix/vfsif.h>
++
++/* The following variables are used for returning results to the caller. */
++EXTERN int err_code;		/* temporary storage for error number */
++
++EXTERN int cch[NR_INODES];
++
++extern char dot1[2];   /* dot1 (&dot1[0]) and dot2 (&dot2[0]) have a special */
++extern char dot2[3];   /* meaning to search_dir: no access permission check. */
++
++extern int(*fs_call_vec[]) (void);
++
++EXTERN message fs_m_in;
++EXTERN message fs_m_out;
++EXTERN vfs_ucred_t credentials;
++
++EXTERN uid_t caller_uid;
++EXTERN gid_t caller_gid;
++
++EXTERN int req_nr;
++
++EXTERN char user_path[PATH_MAX];  /* pathname to be processed */
++
++EXTERN dev_t fs_dev;    	/* The device that is handled by this FS proc.
++				 */
++EXTERN char fs_dev_label[16];	/* Name of the device driver that is handled
++				 * by this FS proc.
++				 */
++EXTERN int unmountdone;
++EXTERN int exitsignaled;
++
++#endif
+diff -rupN kopia_czyste/usr/src/minix/fs/mfs/inode.h kopia_poprawione/usr/src/minix/fs/mfs/inode.h
+--- kopia_czyste/usr/src/minix/fs/mfs/inode.h	2018-06-01 15:39:21.808657100 +0200
++++ kopia_poprawione/usr/src/minix/fs/mfs/inode.h	2018-06-01 15:38:09.178657099 +0200
+@@ -0,0 +1,72 @@
++#ifndef __MFS_INODE_H__
++#define __MFS_INODE_H__
++
++/* Inode table.  This table holds inodes that are currently in use.  In some
++ * cases they have been opened by an open() or creat() system call, in other
++ * cases the file system itself needs the inode for one reason or another,
++ * such as to search a directory for a path name.
++ * The first part of the struct holds fields that are present on the
++ * disk; the second part holds fields not present on the disk.
++ *
++ * Updates:
++ * 2007-01-06: jfdsmit@gmail.com added i_zsearch
++ */
++
++#include <sys/queue.h>
++#include <minix/vfsif.h>
++
++#include "super.h"
++
++EXTERN struct inode {
++  u16_t i_mode;		/* file type, protection, etc. */
++  u16_t i_nlinks;		/* how many links to this file */
++  u16_t i_uid;			/* user id of the file's owner */
++  u16_t i_gid;			/* group number */
++  i32_t i_size;			/* current file size in bytes */
++  u32_t i_atime;		/* time of last access (V2 only) */
++  u32_t i_mtime;		/* when was file data last changed */
++  u32_t i_ctime;		/* when was inode itself changed (V2 only)*/
++  u32_t i_zone[V2_NR_TZONES]; /* zone numbers for direct, ind, and dbl ind */
++  
++  /* The following items are not present on the disk. */
++  dev_t i_dev;			/* which device is the inode on */
++  ino_t i_num;			/* inode number on its (minor) device */
++  int i_count;			/* # times inode used; 0 means slot is free */
++  unsigned int i_ndzones;	/* # direct zones (Vx_NR_DZONES) */
++  unsigned int i_nindirs;	/* # indirect zones per indirect block */
++  struct super_block *i_sp;	/* pointer to super block for inode's device */
++  char i_dirt;			/* CLEAN or DIRTY */
++  zone_t i_zsearch;		/* where to start search for new zones */
++  off_t i_last_dpos;		/* where to start dentry search */
++  
++  char i_mountpoint;		/* true if mounted on */
++
++  char i_seek;			/* set on LSEEK, cleared on READ/WRITE */
++  char i_update;		/* the ATIME, CTIME, and MTIME bits are here */
++
++  LIST_ENTRY(inode) i_hash;     /* hash list */
++  TAILQ_ENTRY(inode) i_unused;  /* free and unused list */
++  
++} inode[NR_INODES];
++
++/* list of unused/free inodes */ 
++EXTERN TAILQ_HEAD(unused_inodes_t, inode)  unused_inodes;
++
++/* inode hashtable */
++EXTERN LIST_HEAD(inodelist, inode)         hash_inodes[INODE_HASH_SIZE];
++
++EXTERN unsigned int inode_cache_hit;
++EXTERN unsigned int inode_cache_miss;
++
++
++/* Field values.  Note that CLEAN and DIRTY are defined in "const.h" */
++#define NO_SEEK            0	/* i_seek = NO_SEEK if last op was not SEEK */
++#define ISEEK              1	/* i_seek = ISEEK if last op was SEEK */
++
++#define IN_MARKCLEAN(i) i->i_dirt = IN_CLEAN
++#define IN_MARKDIRTY(i) do { if(i->i_sp->s_rd_only) { printf("%s:%d: dirty inode on rofs ", __FILE__, __LINE__); util_stacktrace(); } else { i->i_dirt = IN_DIRTY; } } while(0)
++
++#define IN_ISCLEAN(i) i->i_dirt == IN_CLEAN
++#define IN_ISDIRTY(i) i->i_dirt == IN_DIRTY
++
++#endif
+diff -rupN kopia_czyste/usr/src/minix/fs/mfs/mfsdir.h kopia_poprawione/usr/src/minix/fs/mfs/mfsdir.h
+--- kopia_czyste/usr/src/minix/fs/mfs/mfsdir.h	2018-06-01 15:39:21.815323766 +0200
++++ kopia_poprawione/usr/src/minix/fs/mfs/mfsdir.h	2018-06-01 15:38:09.181990433 +0200
+@@ -0,0 +1,20 @@
++#ifndef _MFSDIR_H
++#define _MFSDIR_H
++
++#include <sys/cdefs.h>
++#include <sys/types.h>
++
++/* Maximum Minix MFS on-disk directory filename.
++ * MFS uses 'struct direct' to write and parse 
++ * directory entries, so this can't be changed
++ * without breaking filesystems.
++ */
++
++#define MFS_DIRSIZ	60
++
++struct direct {
++  uint32_t mfs_d_ino;
++  char mfs_d_name[MFS_DIRSIZ];
++} __packed;
++
++#endif /* _MFSDIR_H */
+diff -rupN kopia_czyste/usr/src/minix/fs/mfs/proto.h kopia_poprawione/usr/src/minix/fs/mfs/proto.h
+--- kopia_czyste/usr/src/minix/fs/mfs/proto.h	2018-06-01 15:39:21.825323766 +0200
++++ kopia_poprawione/usr/src/minix/fs/mfs/proto.h	2018-06-01 15:38:09.185323766 +0200
+@@ -0,0 +1,119 @@
++#ifndef __MFS_PROTO_H__
++#define __MFS_PROTO_H__
++
++/* Some shortcuts to functions in -lminixfs */
++#define get_block(d, b, t) lmfs_get_block(d, b, t)
++#define put_block(b, t) lmfs_put_block(b, t)
++
++/* Function prototypes. */
++
++/* Structs used in prototypes must be declared as such first. */
++struct buf;
++struct filp;		
++struct inode;
++struct super_block;
++
++
++/* cache.c */
++zone_t alloc_zone(dev_t dev, zone_t z);
++void free_zone(dev_t dev, zone_t numb);
++
++/* inode.c */
++struct inode *alloc_inode(dev_t dev, mode_t bits);
++void dup_inode(struct inode *ip);
++struct inode *find_inode(dev_t dev, ino_t numb);
++int fs_putnode(void);
++void init_inode_cache(void);
++struct inode *get_inode(dev_t dev, ino_t numb);
++void put_inode(struct inode *rip);
++void update_times(struct inode *rip);
++void rw_inode(struct inode *rip, int rw_flag);
++
++/* link.c */
++int fs_ftrunc(void);
++int fs_link(void);
++int fs_rdlink(void);
++int fs_rename(void);
++int fs_unlink(void);
++int truncate_inode(struct inode *rip, off_t len);
++
++/* misc.c */
++int fs_flush(void);
++int fs_sync(void);
++int fs_new_driver(void);
++int fs_bpeek(void);
++
++/* mount.c */
++int fs_mountpoint(void);
++int fs_readsuper(void);
++int fs_unmount(void);
++
++/* open.c */
++int fs_create(void);
++int fs_inhibread(void);
++int fs_mkdir(void);
++int fs_mknod(void);
++int fs_slink(void);
++struct inode* new_node(struct inode *ldirp, char *string, mode_t bits, zone_t z0);
++
++/* path.c */
++int fs_lookup(void);
++struct inode *advance(struct inode *dirp, char string[MFS_NAME_MAX], int
++	chk_perm);
++int search_dir(struct inode *ldir_ptr, char string [MFS_NAME_MAX], ino_t
++	*numb, int flag, int check_permissions);
++
++
++/* protect.c */
++int fs_chmod(void);
++int fs_chown(void);
++int fs_getdents(void);
++int forbidden(struct inode *rip, mode_t access_desired);
++int read_only(struct inode *ip);
++
++/* read.c */
++int fs_breadwrite(void);
++int fs_readwrite(void);
++void read_ahead(void);
++block_t read_map(struct inode *rip, off_t pos, int opportunistic);
++struct buf *get_block_map(register struct inode *rip, u64_t position);
++zone_t rd_indir(struct buf *bp, int index);
++
++/* stadir.c */
++int fs_stat(void);
++int fs_statvfs(void);
++
++/* super.c */
++bit_t alloc_bit(struct super_block *sp, int map, bit_t origin);
++void free_bit(struct super_block *sp, int map, bit_t bit_returned);
++unsigned int get_block_size(dev_t dev);
++struct super_block *get_super(dev_t dev);
++int read_super(struct super_block *sp);
++int write_super(struct super_block *sp);
++u32_t get_used_blocks(struct super_block *sp);
++
++/* stats.c */
++bit_t count_free_bits(struct super_block *sp, int map);
++
++/* time.c */
++int fs_utime(void);
++
++/* utility.c */
++time_t clock_time(void);
++unsigned conv2(int norm, int w);
++long conv4(int norm, long x);
++void mfs_nul_f(char *file, int line, char *str, unsigned int len,
++	unsigned int maxlen);
++int min(unsigned int l, unsigned int r);
++int no_sys(void);
++void sanitycheck(char *file, int line);
++#define SANITYCHECK sanitycheck(__FILE__, __LINE__)
++
++/* write.c */
++void clear_zone(struct inode *rip, off_t pos, int flag);
++struct buf *new_block(struct inode *rip, off_t position);
++void zero_block(struct buf *bp);
++int write_map(struct inode *, off_t, zone_t, int);
++
++#endif
++
+diff -rupN kopia_czyste/usr/src/minix/fs/mfs/super.h kopia_poprawione/usr/src/minix/fs/mfs/super.h
+--- kopia_czyste/usr/src/minix/fs/mfs/super.h	2018-06-01 15:39:21.831990433 +0200
++++ kopia_poprawione/usr/src/minix/fs/mfs/super.h	2018-06-01 15:38:09.191990433 +0200
+@@ -0,0 +1,79 @@
++#ifndef __MFS_SUPER_H__
++#define __MFS_SUPER_H__
++
++/* Super block table.  The root file system and every mounted file system
++ * has an entry here.  The entry holds information about the sizes of the bit
++ * maps and inodes.  The s_ninodes field gives the number of inodes available
++ * for files and directories, including the root directory.  Inode 0 is 
++ * on the disk, but not used.  Thus s_ninodes = 4 means that 5 bits will be
++ * used in the bit map, bit 0, which is always 1 and not used, and bits 1-4
++ * for files and directories.  The disk layout is:
++ *
++ *    Item        # blocks
++ *    boot block      1
++ *    super block     1    (offset 1kB)
++ *    inode map     s_imap_blocks
++ *    zone map      s_zmap_blocks
++ *    inodes        (s_ninodes + 'inodes per block' - 1)/'inodes per block'
++ *    unused        whatever is needed to fill out the current zone
++ *    data zones    (s_zones - s_firstdatazone) << s_log_zone_size
++ *
++ * A super_block slot is free if s_dev == NO_DEV. 
++ */
++
++EXTERN struct super_block {
++  u32_t s_ninodes;		/* # usable inodes on the minor device */
++  zone1_t  s_nzones;		/* total device size, including bit maps etc */
++  short s_imap_blocks;		/* # of blocks used by inode bit map */
++  short s_zmap_blocks;		/* # of blocks used by zone bit map */
++  zone1_t s_firstdatazone_old;	/* number of first data zone (small) */
++  short s_log_zone_size;	/* log2 of blocks/zone */
++  unsigned short s_flags;	/* FS state flags */
++  i32_t s_max_size;		/* maximum file size on this device */
++  zone_t s_zones;		/* number of zones (replaces s_nzones in V2) */
++  short s_magic;		/* magic number to recognize super-blocks */
++
++  /* The following items are valid on disk only for V3 and above */
++
++  short s_pad2;			/* try to avoid compiler-dependent padding */
++  unsigned short s_block_size;	/* block size in bytes. */
++  char s_disk_version;		/* filesystem format sub-version */
++
++  /* The following items are only used when the super_block is in memory.
++   * If this ever changes, i.e. more fields after s_disk_version has to go to
++   * disk, update LAST_ONDISK_FIELD in super.c as that controls which part of the
++   * struct is copied to and from disk.
++   */
++  
++  /*struct inode *s_isup;*/	/* inode for root dir of mounted file sys */
++  /*struct inode *s_imount;*/   /* inode mounted on */
++  unsigned s_inodes_per_block;	/* precalculated from magic number */
++  zone_t s_firstdatazone;	/* number of first data zone (big) */
++  dev_t s_dev;			/* whose super block is this? */
++  int s_rd_only;		/* set to 1 iff file sys mounted read only */
++  int s_native;			/* set to 1 iff not byte swapped file system */
++  int s_version;		/* file system version, zero means bad magic */
++  int s_ndzones;		/* # direct zones in an inode */
++  int s_nindirs;		/* # indirect zones per indirect block */
++  bit_t s_isearch;		/* inodes below this bit number are in use */
++  bit_t s_zsearch;		/* all zones below this bit number are in use*/
++  char s_is_root;
++} superblock;
++
++#define IMAP		0	/* operating on the inode bit map */
++#define ZMAP		1	/* operating on the zone bit map */
++
++/* s_flags contents; undefined flags are guaranteed to be zero on disk
++ * (not counting future versions of mfs setting them!)
++ */
++#define MFSFLAG_CLEAN	(1L << 0) /* 0: dirty; 1: FS was unmounted cleanly */
++
++/* Future compatability (or at least, graceful failure):
++ * if any of these bits are on, and the MFS or fsck
++ * implementation doesn't understand them, do not mount/fsck
++ * the FS.
++ */
++#define MFSFLAG_MANDATORY_MASK 0xff00
++
++#endif
++
+diff -rupN kopia_czyste/usr/src/minix/fs/mfs/type.h kopia_poprawione/usr/src/minix/fs/mfs/type.h
+--- kopia_czyste/usr/src/minix/fs/mfs/type.h	2018-06-01 15:39:21.841990433 +0200
++++ kopia_poprawione/usr/src/minix/fs/mfs/type.h	2018-06-01 15:38:09.195323767 +0200
+@@ -0,0 +1,20 @@
++#ifndef __MFS_TYPE_H__
++#define __MFS_TYPE_H__
++
++#include <minix/libminixfs.h>
++
++/* Declaration of the V2 inode as it is on the disk (not in core). */
++typedef struct {		/* V2.x disk inode */
++  u16_t d2_mode;		/* file type, protection, etc. */
++  u16_t d2_nlinks;		/* how many links to this file. HACK! */
++  i16_t d2_uid;			/* user id of the file's owner. */
++  u16_t d2_gid;			/* group number HACK! */
++  i32_t d2_size;		/* current file size in bytes */
++  i32_t d2_atime;		/* when was file data last accessed */
++  i32_t d2_mtime;		/* when was file data last changed */
++  i32_t d2_ctime;		/* when was inode data last changed */
++  zone_t d2_zone[V2_NR_TZONES];	/* block nums for direct, ind, and dbl ind */
++} d2_inode;
++
++#endif
++
